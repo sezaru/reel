@@ -31,7 +31,7 @@ reel init                 a new project: types for editors, tsconfig, a first sc
 
 Speed: the 55-second Caremate store promo (1080p60, phone footage, motion blur) takes
 341 s in Remotion. reel draws it at hundreds of frames a second; the whole render takes
-about a minute with x264, or under 30 s with NVENC.
+about a minute with x264, or about 30 s with NVENC.
 
 ## Install
 
