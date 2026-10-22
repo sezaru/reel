@@ -517,6 +517,88 @@ fn nums<'js>(ctx: &Ctx<'js>, v: &[f64]) -> R<Array<'js>> {
     Ok(a)
 }
 
+fn opt_f(o: Option<&Object>, k: &str) -> R<Option<f64>> {
+    match o {
+        Some(o) => get_f(o, k),
+        None => Ok(None),
+    }
+}
+
+/// cv.model() and modelInfo(): frames the model in `rect` (and with `draw`, draws it); returns
+/// [box x, y, w, h, has a screen, its corners (8 numbers), its aspect].
+fn model_call<'js>(ctx: &Ctx<'js>, src: &str, r: &Array<'js>, o: Option<&Object<'js>>, draw: bool) -> R<Array<'js>> {
+    use crate::model;
+    let v: Vec<f64> = r.iter::<f64>().collect::<R<_>>()?;
+    if v.len() != 4 {
+        return Err(Exception::throw_type(ctx, "model: rect is [x, y, w, h]"));
+    }
+    let rect = [v[0], v[1], v[2], v[3]];
+    finite(ctx, "model rect", &rect)?;
+    if !(rect[2] > 0.0 && rect[3] > 0.0) {
+        return Err(Exception::throw_range(ctx, &format!("model: the rect needs a width and a height, got {rect:?}")));
+    }
+    let p = resolve(src);
+    let m = model::load(&p).map_err(|e| Exception::throw_message(ctx, &format!("model {e}")))?;
+    let landscape = match o.map(|o| get_s(o, "orient")).transpose()?.flatten().as_deref() {
+        None | Some("portrait") => false,
+        Some("landscape") => true,
+        Some(x) => return Err(Exception::throw_type(ctx, &format!("model: orient is \"portrait\" or \"landscape\", got {x:?}"))),
+    };
+    let opts = model::Opts {
+        yaw: opt_f(o, "yaw")?.unwrap_or(0.0),
+        pitch: opt_f(o, "pitch")?.unwrap_or(0.0),
+        landscape,
+        scale: opt_f(o, "scale")?.unwrap_or(1.0),
+        fov: opt_f(o, "fov")?.unwrap_or(28.0),
+    };
+    let exposure = opt_f(o, "exposure")?.unwrap_or(1.05);
+    let supersample = opt_f(o, "supersample")?.unwrap_or(2.0);
+    let opacity = opt_f(o, "opacity")?.unwrap_or(1.0);
+    finite(ctx, "model", &[opts.yaw, opts.pitch, opts.scale, opts.fov, exposure, supersample, opacity])?;
+    if !(opts.scale > 0.0 && opts.fov > 0.0 && opts.fov < 180.0 && supersample > 0.0) {
+        return Err(Exception::throw_range(ctx, "model: scale and supersample must be > 0, fov between 0 and 180"));
+    }
+    let cam = model::camera(&m, &opts, rect[2] / rect[3]);
+    let info = model::info(&m, &cam, rect, landscape);
+    if draw {
+        let screen = match o.map(|o| get_s(o, "screen")).transpose()?.flatten() {
+            Some(s) => {
+                if m.screen.is_none() {
+                    return Err(Exception::throw_message(ctx, &format!("model {}: no screen to put {s:?} on (no mesh or material named screen, display or wallpaper)", shown(&p))));
+                }
+                let sp = resolve(&s);
+                let key: Arc<str> = Arc::from(sp.display().to_string());
+                image_size(&key).map_err(|e| Exception::throw_message(ctx, &format!("model screen {}: {e}", shown(&sp))))?;
+                Some(crate::canvas::TexKey::Img(key, 1))
+            }
+            None => None,
+        };
+        let req = model::ModelReq {
+            path: m.path.clone(),
+            size: (0, 0),
+            view_proj: model::bits16(&cam.view_proj),
+            eye: cam.eye.map(|v| (v as f32).to_bits()),
+            landscape,
+            exposure: (exposure as f32).to_bits(),
+            screen,
+        };
+        let b = Bx { opacity, ..Bx::none() };
+        with_cv(ctx, |cv| cv.model(req, rect, &info.hull, supersample, 8192, b))?;
+    }
+    let mut out = info.bbox.to_vec();
+    match info.screen {
+        Some((c, a)) => {
+            out.push(1.0);
+            for q in c {
+                out.extend(q);
+            }
+            out.push(a);
+        }
+        None => out.extend([0.0; 10]),
+    }
+    nums(ctx, &out)
+}
+
 fn io_err(ctx: &Ctx, p: &Path, e: impl std::fmt::Display) -> rquickjs::Error {
     Exception::throw_message(ctx, &format!("{}: {e}", shown(p)))
 }
@@ -662,6 +744,14 @@ fn install<'js>(ctx: &Ctx<'js>, params: &[(String, String)]) -> R<()> {
             }
             with_cv(&ctx, |cv| cv.shader(code, rect, ps))
         })?,
+    )?;
+    set(
+        "model",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, src: String, r: Array<'js>, o: Option<Object<'js>>| -> R<Array<'js>> { model_call(&ctx, &src, &r, o.as_ref(), true) })?,
+    )?;
+    set(
+        "modelInfo",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, src: String, r: Array<'js>, o: Option<Object<'js>>| -> R<Array<'js>> { model_call(&ctx, &src, &r, o.as_ref(), false) })?,
     )?;
     set(
         "pushGroup",

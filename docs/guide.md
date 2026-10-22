@@ -140,6 +140,11 @@ inside a clip intersects with it.
 by default) with your own WGSL: procedural backgrounds, noise, grain, light. See
 `reel docs shaders`.
 
+**3D models** — `cv.model("phone.glb", { rect, screen: "shot.png", yaw: 18, pitch: -6 })`
+draws a glTF device in studio light with an image on its screen, fitted into `rect`. It
+returns the device's box and its screen's corners (`matrix.quad` draws on the screen in
+perspective). See `reel docs models`.
+
 ## Layout
 
 For boxes whose size depends on their text (cards, chips, buttons, labels in any
@@ -221,6 +226,13 @@ normalises the mix (LUFS). The preview is silent.
 4. Render a draft: `reel render scene.ts --scale 0.5 --no-motion-blur -o draft.mp4`; the
    full render once it's right. On an NVIDIA GPU, `--encoder nvenc` encodes several
    times faster.
+
+## Images (store screenshots, posters)
+
+A still is a frame: `reel still scene.ts --at 0 -o shot.png`. A set of images is one scene
+with a frame per image and a marker naming each; `reel still scene.ts --at markers -o
+final/` writes `final/NAME.png` for every marker. Set `motionBlur: false` in such a scene.
+`reel docs models` has the whole pattern, with store sizes.
 
 ## Rendering
 

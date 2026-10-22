@@ -33,4 +33,7 @@ export default video({ duration: 60, background: "#EFE6DA" }, (cv, f) => {
   cv.transform(matrix.perspective({ rotateY: 35, origin: [900, 920], distance: 1200 }), () => cv.rect(800, 860, 200, 120, { fill: "#BC8A33", radius: 16 }));
   cv.clip([1100, 860, 200, 120], 40, () => cv.rect(1050, 820, 300, 200, { gradient: { stops: [["#33291F", 0], ["#C2562F", 1]] } }));
   cv.shader("fn shade(p: vec2f, px: vec2f) -> vec4f { let n = 0.5 + 0.5 * fbm(p * 0.02, 4); return vec4f(n, n * 0.8, n * 0.6, 1.0); }", { rect: [1400, 860, 300, 160] });
+  // a 3D model (slab.gltf: a body, a screen, glass), turned, drawn on through its screen
+  const m = cv.model("slab.gltf", { rect: [1720, 420, 180, 420], yaw: 25, pitch: -10 });
+  if (m.screen) cv.transform(matrix.quad([0, 0, 100, 200], m.screen.corners), () => cv.rect(10, 80, 80, 40, { fill: "#C2562F", radius: 12 }));
 });

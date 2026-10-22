@@ -81,6 +81,8 @@ pub enum TexKey {
     /// a file, decoded at 1/k
     Img(Arc<str>, u32),
     Text { para: T::ParaKey, color: [u8; 3], alpha: u32 },
+    /// a 3D model, rendered on the GPU (model.rs)
+    Model(Arc<crate::model::ModelReq>),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -488,7 +490,7 @@ impl Canvas {
         }
         let (fill, extra) = if let Some((key, uv)) = b.tex {
             let extra = match &key {
-                TexKey::Img(..) => Extra::Img,
+                TexKey::Img(..) | TexKey::Model(..) => Extra::Img,
                 TexKey::Text { para, .. } => Extra::Text(para.s.clone()),
             };
             (Fill::Tex { key, uv }, extra)
@@ -530,6 +532,34 @@ impl Canvas {
             k *= 2;
         }
         self.rect(x, y, w, h, Bx { tex: Some((TexKey::Img(p.clone(), k), uv)), ..b });
+    }
+
+    /// A 3D model rendered into `rect` (model.rs); `hull`: its box's corners on the rect's
+    /// plane, so turning it in place counts as motion.
+    pub fn model(&mut self, mut req: crate::model::ModelReq, rect: Rect, hull: &[[f64; 2]], supersample: f64, max: u32, b: Bx) {
+        let k = self.screen_scale() * self.scale * supersample;
+        let (mut w, mut h) = ((rect[2] * k).round().max(1.0), (rect[3] * k).round().max(1.0));
+        let over = w.max(h) / max as f64;
+        if over > 1.0 {
+            w = (w / over).floor().max(1.0);
+            h = (h / over).floor().max(1.0);
+        }
+        req.size = (w as u32, h as u32);
+        let n = self.ops.len();
+        self.rect(rect[0], rect[1], rect[2], rect[3], Bx { tex: Some((TexKey::Model(Arc::new(req)), [0.0, 0.0, 1.0, 1.0])), ..b });
+        if self.ops.len() > n {
+            let hm = self.hm();
+            let mut pts = Vec::with_capacity(hull.len() * 2);
+            for p in hull {
+                let sx = hm[0][0] * p[0] + hm[0][1] * p[1] + hm[0][2];
+                let sy = hm[1][0] * p[0] + hm[1][1] * p[1] + hm[1][2];
+                let sw = hm[2][0] * p[0] + hm[2][1] * p[1] + hm[2][2];
+                pts.push((sx / sw * 100.0).round() / 100.0);
+                pts.push((sy / sw * 100.0).round() / 100.0);
+            }
+            let last = self.sigs.len() - 1;
+            self.sigs[last] = Sig { kind: b'm', pts, extra: Extra::None };
+        }
     }
 
     /// One line of text whose line box's top-left is (x, y); `lh` its line-height in px

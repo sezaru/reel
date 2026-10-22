@@ -12,6 +12,7 @@ mod docs;
 mod gpu;
 mod image;
 mod layout;
+mod model;
 mod paths;
 mod preview;
 mod render;
@@ -101,7 +102,8 @@ enum Cmd {
     Still {
         #[command(flatten)]
         s: SceneArgs,
-        /// Which frames (times, comma-separated): --at 0,2.5s,end
+        /// Which frames (times, comma-separated): --at 0,2.5s,end; `markers` is every marker (each
+        /// named frame is written as NAME.png)
         #[arg(long, required = true)]
         at: String,
         /// A .png file (one frame) or a directory (default: stills/)
@@ -217,7 +219,22 @@ fn run() -> anyhow::Result<()> {
             let scene = s.scene()?;
             let script = scene.load()?;
             let cfg = script.config.clone();
-            let frames: Vec<usize> = at.split(',').map(|t| cfg.frame_of(t).map(|f| (f.max(0.0) as usize).min(cfg.duration - 1))).collect::<anyhow::Result<_>>()?;
+            // `markers`: every marker; a marker asked for by name names its file
+            let mut wanted: Vec<String> = Vec::new();
+            for t in at.split(',').map(str::trim) {
+                if t == "markers" {
+                    if cfg.markers.is_empty() {
+                        bail!("--at markers: the video has no markers");
+                    }
+                    wanted.extend(cfg.markers.iter().map(|(k, _)| k.clone()));
+                } else {
+                    wanted.push(t.to_string());
+                }
+            }
+            let frames: Vec<(usize, Option<String>)> = wanted
+                .iter()
+                .map(|t| cfg.frame_of(t).map(|f| ((f.max(0.0) as usize).min(cfg.duration - 1), cfg.markers.iter().any(|(k, _)| k == t).then(|| t.clone()))))
+                .collect::<anyhow::Result<_>>()?;
             let out = out.unwrap_or_else(|| PathBuf::from("stills"));
             for p in render::stills(&script, &frames, scale, blur(&cfg, no_motion_blur), &out)? {
                 println!("{}", p.display());

@@ -93,6 +93,10 @@ class CanvasImpl {
     N.shader(src, opts?.rect, opts?.params);
   }
 
+  model(src: string, opts?: any): any {
+    return modelInfoOf(N.model(src, opts?.rect ?? [0, 0, this.width, this.height], opts ?? {}));
+  }
+
   layout(el: any, x: number, y: number): any {
     const r = N.layout(el);
     let i = 0;
@@ -187,6 +191,28 @@ export function video(config: any, draw: (cv: any, f: number) => void): any {
       draw(cv, f);
     },
   });
+}
+
+// ── models ────────────────────────────────────────────────────────────────────────────────
+function modelInfoOf(r: number[]): any {
+  const screen = r[4]
+    ? {
+        corners: [
+          [r[5], r[6]],
+          [r[7], r[8]],
+          [r[9], r[10]],
+          [r[11], r[12]],
+        ],
+        aspect: r[13],
+      }
+    : null;
+  return { box: [r[0], r[1], r[2], r[3]], screen };
+}
+
+export function modelInfo(src: string, opts?: any): any {
+  const rect = opts?.rect ?? (current ? [0, 0, current.width, current.height] : null);
+  if (!rect) throw new Error("modelInfo(): pass opts.rect (or call it after video())");
+  return modelInfoOf(N.modelInfo(src, rect, opts ?? {}));
 }
 
 // ── layout ────────────────────────────────────────────────────────────────────────────────
@@ -497,6 +523,26 @@ export const matrix = {
     const det = a * A + b * B + c * C;
     const k = det === 0 ? 0 : 1 / det;
     return [A * k, -(b * i - c * h) * k, (b * f - c * e) * k, B * k, (a * i - c * g) * k, -(a * f - c * d) * k, C * k, -(a * h - b * g) * k, (a * e - b * d) * k];
+  },
+  quad: (rect: number[], c: number[][]) => {
+    // the unit square onto the four corners (Heckbert), after the rect onto the unit square
+    const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = c;
+    const dx3 = x0 - x1 + x2 - x3;
+    const dy3 = y0 - y1 + y2 - y3;
+    let g = 0;
+    let h = 0;
+    if (Math.abs(dx3) > 1e-12 || Math.abs(dy3) > 1e-12) {
+      const dx1 = x1 - x2;
+      const dx2 = x3 - x2;
+      const dy1 = y1 - y2;
+      const dy2 = y3 - y2;
+      const den = dx1 * dy2 - dx2 * dy1;
+      g = (dx3 * dy2 - dx2 * dy3) / den;
+      h = (dx1 * dy3 - dx3 * dy1) / den;
+    }
+    const sq = [x1 - x0 + g * x1, x3 - x0 + h * x3, x0, y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h, 1];
+    const [rx, ry, rw, rh] = rect;
+    return mul(sq, [1 / rw, 0, -rx / rw, 0, 1 / rh, -ry / rh, 0, 0, 1]);
   },
 };
 

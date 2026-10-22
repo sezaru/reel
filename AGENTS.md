@@ -15,6 +15,8 @@ reel itself.
 | `src/canvas.rs` | the display list a frame records (boxes, shadows, strokes, shaders, layer push/pop) and the motion signatures |
 | `src/gpu.rs`, `src/shaders.wgsl` | executing display lists with wgpu: shapes as SDFs under a homography, layers, blur, motion-blur accumulation, NV12 output, stills, the preview's present pass |
 | `src/shader.rs` | scenes' custom WGSL: the prelude around `fn shade`, validation with naga |
+| `src/model.rs` | glTF models: loading (node transforms baked into world space), finding the screen, three.js's camera framing, `ModelInfo`, the studio room (raycast) |
+| `src/gpu/mesh.rs`, `src/mesh.wgsl`, `src/env.wgsl` | models rendered into textures (MSAA, depth, 2× supersampled): three.js r137's MeshStandardMaterial, its PMREM levels blurred from the room |
 | `src/text.rs` | Parley layout + swash rasterising; fonts from the scene's config, fallback through fontconfig (`fonts.nix`) |
 | `src/layout.rs` | Taffy flexbox over trees built in reel.ts |
 | `src/paths.rs` | SVG path parsing and flattening |
@@ -46,6 +48,11 @@ cargo test --release                       # unit tests (colour parsing, the d.t
 reel check examples/cards.ts               # every example must check clean
 reel sheet examples/cards.ts -o sheet.png  # and look right
 ```
+
+`tests/features.ts` draws every feature on one frame, a model included (`tests/slab.gltf`,
+written by `tests/slab.py`). Models were matched against three.js (the store-screenshot
+skill's `render_phone.py`, same model, screenshot and angles, over grey): SSIM 0.997–0.998
+on the phones and the iPad mini, 0.984 on the iPad Pro; keep it there.
 
 A change to drawing should be compared before/after on real scenes: render the same
 frames with both builds (`reel still … --at …`) and compare (`ffmpeg -i a.png -i b.png

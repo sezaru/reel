@@ -53,9 +53,12 @@ pub fn plan(script: &Script, f: usize, scale: f64, blur: Option<(f64, usize)>) -
     Ok(out)
 }
 
+/// The textures a frame's lists sample that come from files or text (a model's: the image on
+/// its screen; the model itself is rendered on the GPU).
 pub fn tex_keys(samples: &[Vec<Op>]) -> impl Iterator<Item = &TexKey> {
     samples.iter().flatten().filter_map(|op| match op {
         Op::Box(b) => match &b.fill {
+            Fill::Tex { key: TexKey::Model(m), .. } => m.screen.as_ref(),
             Fill::Tex { key, .. } => Some(key),
             _ => None,
         },
@@ -410,15 +413,24 @@ pub fn write_png(path: &Path, w: u32, h: u32, rgb: &[u8]) -> anyhow::Result<()> 
 
 /// Single frames as PNGs: `out` is the file (one frame) or a directory (several, named by
 /// frame number).
-pub fn stills(script: &Script, frames: &[usize], scale: f64, blur: Option<(f64, usize)>, out: &Path) -> anyhow::Result<Vec<PathBuf>> {
+/// PNGs of frames: into `out` itself (one frame, a .png path) or into the directory `out`,
+/// as NAME.png (a marker's) or the frame number.
+pub fn stills(script: &Script, frames: &[(usize, Option<String>)], scale: f64, blur: Option<(f64, usize)>, out: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let cfg = &script.config;
     let mut gpu = Gpu::new((cfg.width, cfg.height), scale, 1500 << 20, cfg.background)?;
     let mut get = |k: &TexKey| Arc::new(decode(k));
     let one = frames.len() == 1 && out.extension().is_some_and(|e| e == "png");
+    if !one {
+        std::fs::create_dir_all(out).with_context(|| format!("{}", out.display()))?;
+    }
     let mut written = Vec::new();
-    for &f in frames {
-        let rgb = gpu.still_rgb(&plan(script, f, scale, blur)?, &mut get);
-        let path = if one { out.to_path_buf() } else { out.join(format!("{f:05}.png")) };
+    for (f, name) in frames {
+        let rgb = gpu.still_rgb(&plan(script, *f, scale, blur)?, &mut get);
+        let path = match (one, name) {
+            (true, _) => out.to_path_buf(),
+            (false, Some(n)) => out.join(format!("{n}.png")),
+            (false, None) => out.join(format!("{f:05}.png")),
+        };
         write_png(&path, gpu.w, gpu.h, &rgb)?;
         written.push(path);
     }

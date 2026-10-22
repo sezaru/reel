@@ -1,6 +1,8 @@
 //! Executes display lists on the GPU (wgpu, headless Vulkan): shapes into a half-float frame,
 //! groups into layers (opacity, Gaussian blur, masks), sub-frames into an accumulation buffer
 //! for motion blur, and the result straight to BT.709 NV12 planes for the encoder.
+mod mesh;
+
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -52,6 +54,8 @@ struct Target {
 
 struct TexEntry {
     bg: BindGroup,
+    /// (models sample images: a screen's)
+    view: Option<TextureView>,
     bytes: u64,
     used: u64,
 }
@@ -135,6 +139,8 @@ pub struct Gpu {
     m_src: ShaderModule,
     /// scenes' custom shaders, by code id
     custom: HashMap<u64, RenderPipeline>,
+    /// 3D models (gpu/mesh.rs)
+    meshes: mesh::Meshes,
 }
 
 fn align(v: u32, a: u32) -> u32 {
@@ -326,6 +332,7 @@ impl Gpu {
         let g = Gpu {
             present: HashMap::new(),
             custom: HashMap::new(),
+            meshes: Default::default(),
             pl_n: pl_n.clone(),
             pl_u: pl_u.clone(),
             design: (design.0 as f64, design.1 as f64),
@@ -415,7 +422,8 @@ impl Gpu {
 
     // ── textures ─────────────────────────────────────────────────────────────────────────────
 
-    fn upload(&mut self, enc: &mut CommandEncoder, key: &TexKey, d: &Decoded) {
+    /// RGBA8 pixels into a texture with its whole mip chain.
+    fn mip_texture(&mut self, enc: &mut CommandEncoder, d: &Decoded) -> Texture {
         let levels = 32 - d.w.max(d.h).leading_zeros();
         let tex = self.device.create_texture(&TextureDescriptor {
             label: None,
@@ -433,7 +441,12 @@ impl Gpu {
             TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * d.w), rows_per_image: Some(d.h) },
             Extent3d { width: d.w, height: d.h, depth_or_array_layers: 1 },
         );
-        // the mip chain, each level a 2×2 box of the one above
+        self.mips(enc, &tex, levels);
+        tex
+    }
+
+    /// A texture's mip chain from its level 0, each level a 2×2 box of the one above.
+    fn mips(&mut self, enc: &mut CommandEncoder, tex: &Texture, levels: u32) {
         let level = |l: u32| tex.create_view(&TextureViewDescriptor { base_mip_level: l, mip_level_count: Some(1), ..Default::default() });
         for l in 1..levels {
             let src = level(l - 1);
@@ -449,6 +462,10 @@ impl Gpu {
             pass.set_bind_group(1, &bg, &[]);
             pass.draw(0..3, 0..1);
         }
+    }
+
+    fn upload(&mut self, enc: &mut CommandEncoder, key: &TexKey, d: &Decoded) {
+        let tex = self.mip_texture(enc, d);
         let view = tex.create_view(&Default::default());
         let bg = self.device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -457,7 +474,7 @@ impl Gpu {
         });
         let bytes = d.w as u64 * d.h as u64 * 4 * 4 / 3;
         self.tex_bytes += bytes;
-        self.textures.insert(key.clone(), TexEntry { bg, bytes, used: self.stamp });
+        self.textures.insert(key.clone(), TexEntry { bg, view: Some(view), bytes, used: self.stamp });
         self.stats.uploaded += 1;
     }
 
@@ -513,11 +530,24 @@ impl Gpu {
                 match op {
                     Op::Box(b) => {
                         if let Fill::Tex { key, .. } = &b.fill {
-                            if let Some(e) = self.textures.get_mut(key) {
-                                e.used = self.stamp;
-                            } else {
-                                let d = get(key);
-                                self.upload(enc, key, &d);
+                            let (img, model) = match key {
+                                TexKey::Model(m) => (m.screen.as_ref(), Some(m)),
+                                k => (Some(k), None),
+                            };
+                            if let Some(k) = img {
+                                if let Some(e) = self.textures.get_mut(k) {
+                                    e.used = self.stamp;
+                                } else {
+                                    let d = get(k);
+                                    self.upload(enc, k, &d);
+                                }
+                            }
+                            if let Some(m) = model {
+                                if let Some(e) = self.textures.get_mut(key) {
+                                    e.used = self.stamp;
+                                } else {
+                                    self.render_model(enc, key, m);
+                                }
                             }
                         }
                     }
@@ -603,7 +633,7 @@ impl Gpu {
             entries: &[BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&view) }, BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&self.smp_tex) }],
         });
         // pinned: never evicted
-        self.textures.insert(key, TexEntry { bg: bg.clone(), bytes: 0, used: u64::MAX });
+        self.textures.insert(key, TexEntry { bg: bg.clone(), view: None, bytes: 0, used: u64::MAX });
         bg
     }
 

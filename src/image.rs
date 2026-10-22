@@ -1,5 +1,5 @@
 //! Texture keys → premultiplied RGBA8: image files (JPEG through libjpeg-turbo, decoded at
-//! 1/k with its DCT scaling; PNG) and text (text.rs).
+//! 1/k with its DCT scaling; PNG) and text (text.rs). (Models are rendered on the GPU.)
 use std::cell::RefCell;
 
 use crate::canvas::TexKey;
@@ -22,17 +22,27 @@ pub fn decode(key: &TexKey) -> Decoded {
             let r = text::raster(para, *color, f32::from_bits(*alpha));
             Decoded { w: r.w as u32, h: r.h as u32, data: r.data }
         }
+        TexKey::Model(_) => unreachable!("models are rendered, not decoded"),
     }
 }
 
 fn file(p: &str, k: u32) -> anyhow::Result<Decoded> {
     let data = std::fs::read(p)?;
+    scaled(&data, k, true)
+}
+
+/// A JPEG or PNG in memory → RGBA8, premultiplied or straight.
+pub fn bytes(data: &[u8], premul: bool) -> anyhow::Result<Decoded> {
+    scaled(data, 1, premul)
+}
+
+fn scaled(data: &[u8], k: u32, premul: bool) -> anyhow::Result<Decoded> {
     if data.starts_with(&[0xFF, 0xD8]) {
         return JPEG.with(|d| {
             let mut d = d.borrow_mut();
             let sf = turbojpeg::ScalingFactor::new(1, k.max(1) as usize);
             d.set_scaling_factor(sf)?;
-            let hd = d.read_header(&data)?.scaled(sf);
+            let hd = d.read_header(data)?.scaled(sf);
             let mut img = turbojpeg::Image {
                 pixels: vec![0u8; 4 * hd.width * hd.height],
                 width: hd.width,
@@ -40,11 +50,11 @@ fn file(p: &str, k: u32) -> anyhow::Result<Decoded> {
                 height: hd.height,
                 format: turbojpeg::PixelFormat::RGBA,
             };
-            d.decompress(&data, img.as_deref_mut())?;
+            d.decompress(data, img.as_deref_mut())?;
             Ok(Decoded { w: hd.width as u32, h: hd.height as u32, data: img.pixels })
         });
     }
-    let mut dec = png::Decoder::new(std::io::Cursor::new(&data));
+    let mut dec = png::Decoder::new(std::io::Cursor::new(data));
     dec.set_transformations(png::Transformations::normalize_to_color8());
     let mut r = dec.read_info()?;
     let mut buf = vec![0; r.output_buffer_size().ok_or_else(|| anyhow::anyhow!("PNG too large"))?];
@@ -59,7 +69,7 @@ fn file(p: &str, k: u32) -> anyhow::Result<Decoded> {
         png::ColorType::Grayscale => px.iter().for_each(|&c| rgba.extend_from_slice(&[c, c, c, 255])),
         t => anyhow::bail!("PNG colour type {t:?}"),
     }
-    for c in rgba.chunks_mut(4) {
+    for c in rgba.chunks_mut(4).filter(|_| premul) {
         let a = c[3] as u32;
         for v in &mut c[..3] {
             *v = ((*v as u32 * a + 127) / 255) as u8;

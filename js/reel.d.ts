@@ -209,6 +209,40 @@ declare module "reel" {
     shadow?: Shadow;
   }
 
+  export interface ModelOptions {
+    /** The box the model is fitted into, whole (contain, with a hair of margin), in the current coordinates. Default: the whole frame. */
+    rect?: Rect;
+    /** Degrees the camera orbits the device: yaw about its vertical axis (positive: from its right, so you see its right edge), pitch about its horizontal one (negative: from above). Keep both modest so the screen stays legible. */
+    yaw?: number;
+    pitch?: number;
+    /** "landscape" turns the device 90° (tablets); give it a landscape image. Default "portrait". */
+    orient?: "portrait" | "landscape";
+    /** How much of the rect the device fills: 1 (default) touches its binding side; 0.6 leaves room beside it. */
+    scale?: number;
+    /** An image (JPEG or PNG) on the screen: a screenshot, a filmed frame. Capture it at the screen's aspect (`ModelInfo.screen.aspect`) or it is stretched. Without it the model's own screen shows. */
+    screen?: string;
+    /** Vertical field of view in degrees (default 28). */
+    fov?: number;
+    /** Light (default 1.05). */
+    exposure?: number;
+    opacity?: number;
+    /** Rendered at this many times its size on the frame, then filtered down (default 2: clean edges on glossy metal). */
+    supersample?: number;
+  }
+
+  /** Where a model landed, in the coordinates its rect was given in. */
+  export interface ModelInfo {
+    /** The device's box (x, y, w, h): keep copy clear of it, or overlap it on purpose. */
+    box: Rect;
+    /**
+     * Its screen: the corners of the image it shows (top-left, top-right, bottom-right,
+     * bottom-left) and that image's aspect (width / height). Draw on the screen, in
+     * perspective, with `cv.transform(matrix.quad([0, 0, w, h], screen.corners), …)`. Null
+     * when the model has no screen (a mesh or material named screen, display or wallpaper).
+     */
+    screen: { corners: [[number, number], [number, number], [number, number], [number, number]]; aspect: number } | null;
+  }
+
   /** What `draw` gets: a recorder of shapes. Nothing it draws is visible until the frame ends. */
   export interface Canvas {
     /** The frame being drawn (fractional for motion-blur sub-frames). */
@@ -233,6 +267,13 @@ declare module "reel" {
     path(d: string | Path, style: PathStyle): void;
     /** A custom WGSL shader filling `rect` (default: the whole frame); see `reel docs shaders`. `src` is a .wgsl file or the source itself. */
     shader(src: string, opts?: { rect?: Rect; params?: number[] }): void;
+    /**
+     * A 3D model (glTF 2.0, `.gltf` or `.glb`, relative to the scene file): a phone, a tablet,
+     * in studio light, fitted into `opts.rect` (default: the whole frame), an image on its
+     * screen. It is drawn like an image: transforms, clips and groups (a drop shadow) apply.
+     * Returns where it landed; see `reel docs models`.
+     */
+    model(src: string, opts?: ModelOptions): ModelInfo;
     /** Lays out a box tree (see `row`, `col`) with its top-left at (x, y), draws it; returns its size. */
     layout(el: El, x: number, y: number): Size;
 
@@ -392,6 +433,8 @@ declare module "reel" {
     multiply(a: Matrix, b: Matrix): Matrix;
     apply(m: Matrix, x: number, y: number): [number, number];
     invert(m: Matrix): Matrix;
+    /** The homography that maps `rect` onto four corners (top-left, top-right, bottom-right, bottom-left): draw on a model's screen, a sign in a photo. */
+    quad(rect: Rect, corners: [number, number][]): Matrix;
   };
 
   // ── files ───────────────────────────────────────────────────────────────────────────────
@@ -408,4 +451,6 @@ declare module "reel" {
   export function imageSize(path: string): Size;
   /** The image files (JPEG, PNG) in a directory, sorted by name, as paths: an image sequence. */
   export function frames(dir: string): string[];
+  /** Where `cv.model(src, opts)` would put a model, without drawing it (to lay a scene out around it). `opts.rect` defaults to the whole frame. */
+  export function modelInfo(src: string, opts?: ModelOptions): ModelInfo;
 }

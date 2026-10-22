@@ -6,6 +6,7 @@ use anyhow::Context as _;
 
 const GUIDE: &str = include_str!("../docs/guide.md");
 const SHADERS: &str = include_str!("../docs/shaders.md");
+const MODELS: &str = include_str!("../docs/models.md");
 const API: &str = include_str!("../js/reel.d.ts");
 const EXAMPLES: &[(&str, &str)] = &[
     ("hello.ts", include_str!("../examples/hello.ts")),
@@ -34,12 +35,13 @@ pub fn print(topic: &str) -> anyhow::Result<()> {
         "guide" => print!("{GUIDE}"),
         "api" => print!("{API}"),
         "shaders" => print!("{SHADERS}"),
+        "models" => print!("{MODELS}"),
         "examples" => {
             for (name, src) in EXAMPLES {
                 println!("// ═══ examples/{name} ═══\n{src}");
             }
         }
-        t => anyhow::bail!("no docs topic {t:?}: guide, api, shaders, examples"),
+        t => anyhow::bail!("no docs topic {t:?}: guide, api, shaders, models, examples"),
     }
     Ok(())
 }
